@@ -6,7 +6,9 @@ import tkinter as tk
 from tkinter import scrolledtext, ttk
 from datetime import datetime
 import threading
+import time
 import winsound
+import cv2
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -14,9 +16,9 @@ from google.auth.transport.requests import Request
 from dotenv import load_dotenv, set_key
 
 # ── CONFIGURACION DE RUTAS ────────────────────────────────
-ENV_PATH   = os.path.abspath(".env")
-CONFIG_DIR = os.path.abspath("config")
-CREDS_JSON = os.path.join(CONFIG_DIR, "credentials.json")
+ENV_PATH     = os.path.abspath(".env")
+CONFIG_DIR   = os.path.abspath("config")
+CREDS_JSON   = os.path.join(CONFIG_DIR, "credentials.json")
 TOKEN_PICKLE = os.path.join(CONFIG_DIR, "token.pickle")
 
 if not os.path.exists(CONFIG_DIR):
@@ -53,7 +55,7 @@ STATUS_MAP = {
     "info":  (FG_INFO, "Conectando..."),
 }
 
-# ── UTILIDADES ───────────────────────────────────────────
+# ── UTILIDADES ────────────────────────────────────────────
 def play_notification_sound():
     try:
         winsound.MessageBeep(winsound.MB_OK)
@@ -101,31 +103,66 @@ def upload_to_drive(filepath):
     file_id = response.get("id")
     service.permissions().create(
         fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
-    return f"https://drive.google.com/file/d/{file_id}/view"
+    return file_id
+
+# ── THUMBNAIL ─────────────────────────────────────────────
+def extract_thumbnail(filepath):
+    """Extrae un frame del 10% de duración del video y lo guarda como JPG temporal."""
+    cap = cv2.VideoCapture(filepath)
+    total = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+    fps   = cap.get(cv2.CAP_PROP_FPS) or 30
+    # Saltar al 10% del video para evitar pantallas negras del inicio
+    target = int(total * 0.10)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return None
+    thumb_path = filepath.rsplit(".", 1)[0] + "_thumb.jpg"
+    cv2.imwrite(thumb_path, frame)
+    return thumb_path
+
+def upload_thumbnail_to_drive(thumb_path):
+    """Sube el thumbnail a Drive y devuelve la URL directa de imagen."""
+    service = get_drive_service()
+    media   = MediaFileUpload(thumb_path, mimetype="image/jpeg")
+    file_meta = {"name": os.path.basename(thumb_path)}
+    result  = service.files().create(
+        body=file_meta, media_body=media, fields="id").execute()
+    file_id = result.get("id")
+    service.permissions().create(
+        fileId=file_id, body={"type": "anyone", "role": "reader"}).execute()
+    # URL directa para embeds
+    return f"https://drive.google.com/uc?id={file_id}"
 
 # ── DISCORD ───────────────────────────────────────────────
-def send_to_discord(link, filepath, duration_str):
+def send_to_discord(link, filepath, duration_str, thumb_url=None):
     webhook_url = os.getenv("DISCORD_WEBHOOK")
     if not webhook_url:
         return False
     now      = datetime.now()
     size_str = format_size(filepath)
-    payload  = {
+    embed = {
+        "title":       "📼 Grabación Disponible",
+        "description": f"**[Abrir en Google Drive]({link})**",
+        "color":       0x7C3AED,
+        "fields": [
+            {"name": "Archivo",  "value": f"`{os.path.basename(filepath)}`", "inline": True},
+            {"name": "Duración", "value": f"`{duration_str}`",               "inline": True},
+            {"name": "Tamaño",   "value": f"`{size_str}`",                   "inline": True},
+            {"name": "Fecha",    "value": now.strftime("%d/%m/%Y"),           "inline": True},
+            {"name": "Hora",     "value": now.strftime("%I:%M %p").replace("AM", "a.m.").replace("PM", "p.m."), "inline": True},
+        ],
+        "footer": {"text": "Si Google Drive no ha terminado de procesar la grabación, puedes descargarla de todas formas.\n"
+        "\n"
+        "Violet Recorder v1.0"},
+    }
+    if thumb_url:
+        embed["image"] = {"url": thumb_url}
+    payload = {
         "username":   "Violet Recorder",
         "avatar_url": "https://i.imgur.com/QTWoeUF.png",
-        "embeds": [{
-            "title":       "📼 Grabación Disponible",   
-            "description": f"**[Abrir en Google Drive]({link})**",
-            "color":       0x7C3AED,
-            "fields": [
-                {"name": "Archivo",  "value": f"`{os.path.basename(filepath)}`", "inline": True},
-                {"name": "Duración", "value": f"`{duration_str}`",               "inline": True},
-                {"name": "Tamaño",  "value": f"`{size_str}`",                   "inline": True},
-                {"name": "Fecha",    "value": now.strftime("%d/%m/%Y"),           "inline": True},
-                {"name": "Hora", "value": now.strftime("%I:%M %p").replace("AM", "a.m.").replace("PM", "p.m."), "inline": True},
-            ],
-            "footer":    {"text": "Violet Recorder v1.0"},
-        }]
+        "embeds": [embed],
     }
     try:
         r = requests.post(webhook_url, json=payload, timeout=10)
@@ -163,13 +200,30 @@ class RecordingHandler:
             self.app.after(0, self.app.set_status, "info")
             self.app.after(0, self.app.add_log,
                            "Subiendo archivo a Google Drive...", "info")
-            link = upload_to_drive(filepath)
+            file_id = upload_to_drive(filepath)
             self.app.after(0, self.app.add_log,
-                           "Archivo subido correctamente.", "ok")
+                           "Archivo subido a Drive.", "ok")
+
+            link = f"https://drive.google.com/file/d/{file_id}/view"
+
+            # Extraer thumbnail y subirlo
+            thumb_url = None
+            try:
+                self.app.after(0, self.app.add_log,
+                               "Generando previsualización...", "info")
+                thumb_path = extract_thumbnail(filepath)
+                if thumb_path:
+                    thumb_url = upload_thumbnail_to_drive(thumb_path)
+                    os.remove(thumb_path)  # limpiar archivo temporal
+                    self.app.after(0, self.app.add_log,
+                                   "Previsualización generada.", "ok")
+            except Exception as e:
+                self.app.after(0, self.app.add_log,
+                               f"No se pudo generar la previsualización: {e}", "warn")
 
             self.app.after(0, self.app.add_log,
                            "Enviando notificación a Discord...", "info")
-            if send_to_discord(link, filepath, duration):
+            if send_to_discord(link, filepath, duration, thumb_url):
                 self.app.after(0, self.app.add_log,
                                "Notificación enviada a Discord.", "ok")
             else:
@@ -280,6 +334,18 @@ class App(tk.Tk):
         ts     = datetime.now().strftime("%H:%M:%S")
         prefix = {"info": "INFO", "ok": "OK  ", "warn": "WARN",
                   "error": "ERR "}.get(tag, "    ")
+        self.log_area.insert(tk.END, f"[{ts}]  ", "muted")
+        self.log_area.insert(tk.END, f"{prefix}  ", tag)
+        self.log_area.insert(tk.END, f"{message}\n")
+        self.log_area.see(tk.END)
+
+    def update_last_log(self, message, tag="info"):
+        """Sobreescribe la última línea del log en vez de agregar una nueva."""
+        ts     = datetime.now().strftime("%H:%M:%S")
+        prefix = {"info": "INFO", "ok": "OK  ", "warn": "WARN",
+                  "error": "ERR "}.get(tag, "    ")
+        # Borrar la última línea
+        self.log_area.delete("end-2l", "end-1l")
         self.log_area.insert(tk.END, f"[{ts}]  ", "muted")
         self.log_area.insert(tk.END, f"{prefix}  ", tag)
         self.log_area.insert(tk.END, f"{message}\n")
