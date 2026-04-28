@@ -1,7 +1,6 @@
-obsws-python
-requests
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
 python-dotenv
 opencv-python
+requests
