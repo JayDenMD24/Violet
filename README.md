@@ -1,14 +1,18 @@
-# Violet Uploader v1.2
+# Violet Uploader
 
-Aplicación de escritorio para Windows que permite subir videos a Google Drive y enviar notificaciones a Discord con miniatura, duración, tamaño y fecha del archivo.
+Aplicación web para Windows que permite subir archivos y carpetas a Google Drive preservando la estructura de directorios, con notificaciones a Discord y miniaturas automáticas.
 
 ## Características
 
-- Subida manual de videos a Google Drive
-- Notificación a Discord con nombre, duración, tamaño, fecha, hora y miniatura del archivo
-- Interfaz oscura con estética Discord
-- Configuración de múltiples webhooks de Discord (hasta 5)
-- Gestión de autenticación desde la app
+- **Subida de cualquier tipo de archivo** — videos, imágenes, documentos, audio, etc.
+- **Subida de carpetas completas** — preserva la estructura de subdirectorios en Google Drive
+- **Arrastrar y soltar** — carpetas y archivos desde el explorador de Windows
+- **Google Drive API** — autenticación OAuth, archivos públicos visibles desde cualquier enlace
+- **Notificaciones a Discord** — embed con miniatura, duración (video), tamaño, tipo de archivo y fecha
+- **Múltiples webhooks** — hasta 5 canales de Discord configurables desde la interfaz
+- **Thumbnails automáticos** — extraídos del primer video o imagen encontrados
+- **Interfaz oscura** — estilo Discord
+- **Ventana nativa** — usando pywebview (fallback a navegador si no está disponible)
 
 ## Requisitos
 
@@ -34,56 +38,37 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Configurar variables de entorno
-
-Copia `.env.example` a `.env`:
-
-```
-copy .env.example .env
-```
-
-Configura los webhooks de Discord (opcional, también puedes hacerlo desde la app):
-
-```
-DISCORD_WEBHOOK_0=https://discord.com/api/webhooks/...
-DISCORD_WEBHOOK_NAME_0=Mi Canal
-```
-
-### 4. Configurar Google Drive API
+### 3. Configurar Google Drive API
 
 1. Ve a [Google Cloud Console](https://console.cloud.google.com/)
 2. Crea un nuevo proyecto
 3. Habilita la **Google Drive API**
-4. Ve a **Credenciales** → **Crear credenciales** → **OAuth 2.0 (ID de cliente OAuth)**
+4. Ve a **Credenciales** → **Crear credenciales** → **ID de cliente OAuth**
 5. Selecciona tipo **Aplicación de escritorio**
 6. Descarga el archivo `credentials.json`
-7. Coloca `credentials.json` en la carpeta `config/`
+7. Crea la carpeta `config/` y coloca `credentials.json` allí
 
-La primera vez que inicies sesión desde la app, se abrirá el navegador para autorizar el acceso. El token se guardará automáticamente en `config/token.pickle`.
+### 4. Configurar webhooks de Discord (opcional)
+
+Copia `.env.example` a `.env` y configura los webhooks, o hazlo desde la interfaz de la app.
 
 ### 5. Ejecutar
 
 ```
-python violet_uploader.py
+python app.py
 ```
 
-## Configuración desde la app
+La primera vez que inicies sesión se abrirá el navegador para autorizar el acceso a Google Drive. El token se guarda automáticamente en `config/token.pickle`.
 
-Desde el botón **Configuración** en la interfaz puedes:
-
-- Iniciar/cerrar sesión con Google Drive
-- Añadir hasta 5 webhooks de Discord (nombre + URL)
-- Los cambios se guardan automáticamente en `.env`
-
-## Compilar a .exe
+## Compilar a .exe (opcional)
 
 ```
 pip install pyinstaller
-pyinstaller --onefile --windowed --icon=icono.ico --name "Violet Uploader" violet_uploader.py
+build.bat
 ```
 
-El ejecutable quedará en la carpeta `dist/`. Asegúrate de tener `icono.ico`, `.env` y la carpeta `config/` con `credentials.json` en la misma carpeta que el `.exe`.
+El ejecutable se crea en `dist/Violet.exe`. Coloca la carpeta `config/` con `credentials.json` junto al `.exe`.
 
-## LICENCIA
+## Licencia
 
 MIT

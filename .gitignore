@@ -2,8 +2,10 @@ venv/
 .env
 config/*
 !config/.gitkeep
+uploads/
 build/
 dist/
 __pycache__/
 *.spec
 *.exe
+build.bat
